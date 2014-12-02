@@ -1,4 +1,5 @@
 <?php
+/* vim: set ts=4 sw=4 et: */
 /**
  * Pure-PHP ssh-agent client.
  *
@@ -206,6 +207,47 @@ class System_SSH_Agent_Identity
     }
 }
 
+class System_SSH_Agent_Proxy
+{
+    var $fsock;
+
+    function System_SSH_Agent_Proxy() 
+    {
+        switch (true) {
+            case isset($_SERVER['SSH_AUTH_SOCK']):
+                $address = $_SERVER['SSH_AUTH_SOCK'];
+                break;
+            case isset($_ENV['SSH_AUTH_SOCK']):
+                $address = $_ENV['SSH_AUTH_SOCK'];
+                break;
+            default:
+                user_error('SSH_AUTH_SOCK not found');
+                return false;
+        }
+
+        $this->fsock = fsockopen('unix://' . $address, 0, $errno, $errstr);
+        if (!$this->fsock) {
+            user_error("Unable to connect to ssh-agent (Error $errno: $errstr)");
+        }
+        stream_set_timeout($this->fsock, 1);
+    }   
+
+    function process($packet) 
+    {
+        if (strlen($packet) != fwrite($this->fsock, $packet)) {
+            user_error('Connection closed during signing');
+        }
+        echo "entering process fread\n";
+        ob_flush();
+        flush();
+        $data = fread($this->fsock, 2048);
+        echo "exited process fread\n";
+        ob_flush();
+        flush();
+        return $data;
+    }
+}
+
 /**
  * Pure-PHP ssh-agent client identity factory
  *
@@ -225,13 +267,15 @@ class System_SSH_Agent
      */
     var $fsock;
 
+    var $request_forwarding;
+
     /**
      * Default Constructor
      *
      * @return System_SSH_Agent
      * @access public
      */
-    function System_SSH_Agent()
+    function System_SSH_Agent($request_forwarding = false)
     {
         switch (true) {
             case isset($_SERVER['SSH_AUTH_SOCK']):
@@ -249,6 +293,8 @@ class System_SSH_Agent
         if (!$this->fsock) {
             user_error("Unable to connect to ssh-agent (Error $errno: $errstr)");
         }
+
+        $this->request_forwarding = $request_forwarding;
     }
 
     /**
@@ -309,5 +355,10 @@ class System_SSH_Agent
         }
 
         return $identities;
+    }
+
+    function haveRequestedForwarding()
+    {
+        return $this->request_forwarding;
     }
 }

@@ -1,5 +1,5 @@
 <?php
-
+/* vim: set ts=4 sw=4 et: */
 /**
  * Pure-PHP implementation of SSHv2.
  *
@@ -99,6 +99,10 @@ define('NET_SSH2_MASK_WINDOW_ADJUST', 0x00000020);
 define('NET_SSH2_CHANNEL_EXEC',      0); // PuTTy uses 0x100
 define('NET_SSH2_CHANNEL_SHELL',     1);
 define('NET_SSH2_CHANNEL_SUBSYSTEM', 2);
+define('NET_SSH2_CHANNEL_AGENT_REQUEST', 3);
+define('NET_SSH2_CHANNEL_AGENT_PROXY', 4);
+
+
 /**#@-*/
 
 /**#@+
@@ -122,6 +126,10 @@ define('NET_SSH2_LOG_REALTIME', 3);
  */
 define('NET_SSH2_LOG_REALTIME_FILE', 4);
 /**#@-*/
+
+define('NET_SSH2_LOGGING', NET_SSH2_LOG_REALTIME_FILE);
+
+define('NET_SSH2_LOG_REALTIME_FILENAME', 'test.log');
 
 /**#@+
  * @access public
@@ -623,6 +631,8 @@ class Net_SSH2
      * @access private
      */
     var $curTimeout;
+
+    var $debug_me;
 
     /**
      * Real-time log file pointer
@@ -2134,7 +2144,7 @@ class Net_SSH2
     {
         $keys = $agent->requestIdentities();
         foreach ($keys as $key) {
-            if ($this->_privatekey_login($username, $key)) {
+            if ($this->_privatekey_login($username, $key, $agent->haveRequestedForwarding())) {
                 return true;
             }
         }
@@ -2152,7 +2162,7 @@ class Net_SSH2
      * @internal It might be worthwhile, at some point, to protect against {@link http://tools.ietf.org/html/rfc4251#section-9.3.9 traffic analysis}
      *           by sending dummy SSH_MSG_IGNORE messages.
      */
-    function _privatekey_login($username, $privatekey)
+    function _privatekey_login($username, $privatekey, $forwardrequest = false)
     {
         // see http://tools.ietf.org/html/rfc4253#page-15
         $publickey = $privatekey->getPublicKey(CRYPT_RSA_PUBLIC_FORMAT_RAW);
@@ -2228,10 +2238,48 @@ class Net_SSH2
                 return false;
             case NET_SSH2_MSG_USERAUTH_SUCCESS:
                 $this->bitmap |= NET_SSH2_MASK_LOGIN;
+                if ($forwardrequest) {
+                    $this->_request_forwarding();
+                }
                 return true;
         }
 
         return false;
+    }
+
+    function _request_forwarding() {
+        $this->window_size_server_to_client[NET_SSH2_CHANNEL_AGENT_REQUEST] = $this->window_size;
+        $packet_size = 0x4000;
+
+        $packet = pack('CNa*N3',
+            NET_SSH2_MSG_CHANNEL_OPEN, strlen('session'), 'session', NET_SSH2_CHANNEL_AGENT_REQUEST, $this->window_size_server_to_client[NET_SSH2_CHANNEL_AGENT_REQUEST], $packet_size);
+
+        $this->channel_status[NET_SSH2_CHANNEL_AGENT_REQUEST] = NET_SSH2_MSG_CHANNEL_OPEN;
+
+        if (!$this->_send_binary_packet($packet)) {
+            return false;
+        }
+
+        $response = $this->_get_channel_packet(NET_SSH2_CHANNEL_AGENT_REQUEST);
+        if ($response === false) {
+            return false;
+        }
+
+        $packet = pack('CNNa*C',
+            NET_SSH2_MSG_CHANNEL_REQUEST, $this->server_channels[NET_SSH2_CHANNEL_AGENT_REQUEST], strlen('auth-agent-req@openssh.com'), 'auth-agent-req@openssh.com', 1);
+
+        $this->channel_status[NET_SSH2_CHANNEL_AGENT_REQUEST] = NET_SSH2_MSG_CHANNEL_REQUEST;
+
+        if (!$this->_send_binary_packet($packet)) { 
+            return false;
+        }
+
+        $response = $this->_get_channel_packet(NET_SSH2_CHANNEL_AGENT_REQUEST);
+        if ($response === false) {
+            return false;
+        }
+
+	    return true;
     }
 
     /**
@@ -2311,6 +2359,7 @@ class Net_SSH2
             if (!$this->_send_binary_packet($packet)) {
                 return false;
             }
+
             $response = $this->_get_binary_packet();
             if ($response === false) {
                 user_error('Connection closed by server');
@@ -2340,17 +2389,18 @@ class Net_SSH2
         // SSH_MSG_CHANNEL_OPEN_CONFIRMATION, RFC4254#section-5.1 states that the "maximum packet size" refers to the
         // "maximum size of an individual data packet". ie. SSH_MSG_CHANNEL_DATA.  RFC4254#section-5.2 corroborates.
         $packet = pack('CNNa*CNa*',
-            NET_SSH2_MSG_CHANNEL_REQUEST, $this->server_channels[NET_SSH2_CHANNEL_EXEC], strlen('exec'), 'exec', 1, strlen($command), $command);
+					NET_SSH2_MSG_CHANNEL_REQUEST, $this->server_channels[NET_SSH2_CHANNEL_EXEC], strlen('exec'), 'exec', 1, strlen($command), $command);
+
         if (!$this->_send_binary_packet($packet)) {
             return false;
-        }
+	    }
 
         $this->channel_status[NET_SSH2_CHANNEL_EXEC] = NET_SSH2_MSG_CHANNEL_REQUEST;
 
         $response = $this->_get_channel_packet(NET_SSH2_CHANNEL_EXEC);
         if ($response === false) {
             return false;
-        }
+	    }
 
         $this->channel_status[NET_SSH2_CHANNEL_EXEC] = NET_SSH2_MSG_CHANNEL_DATA;
 
@@ -2762,7 +2812,7 @@ class Net_SSH2
         if (defined('NET_SSH2_LOGGING')) {
             $current = strtok(microtime(), ' ') + strtok('');
             $message_number = isset($this->message_numbers[ord($payload[0])]) ? $this->message_numbers[ord($payload[0])] : 'UNKNOWN (' . ord($payload[0]) . ')';
-            $message_number = '<- ' . $message_number .
+            $message_number = '<- ' . $message_number . 
                               ' (since last: ' . round($current - $this->last_packet, 4) . ', network: ' . round($stop - $start, 4) . 's)';
             $this->_append_log($message_number, $payload);
             $this->last_packet = $current;
@@ -2774,7 +2824,7 @@ class Net_SSH2
     /**
      * Filter Binary Packets
      *
-     * Because some binary packets need to be ignored...
+     * Because some binary packets need to be ignored...;
      *
      * @see Net_SSH2::_get_binary_packet()
      * @return String
@@ -2808,6 +2858,8 @@ class Net_SSH2
                     }
                     $payload = $this->_get_binary_packet();
                 }
+            default: 
+                break;
         }
 
         // see http://tools.ietf.org/html/rfc4252#section-5.4; only called when the encryption has been activated and when we haven't already logged in
@@ -2822,6 +2874,8 @@ class Net_SSH2
         if (($this->bitmap & NET_SSH2_MASK_CONNECTED) && ($this->bitmap & NET_SSH2_MASK_LOGIN)) {
             switch (ord($payload[0])) {
                 case NET_SSH2_MSG_GLOBAL_REQUEST: // see http://tools.ietf.org/html/rfc4254#section-4
+
+                    echo "global request\n";
                     $this->_string_shift($payload, 1);
                     extract(unpack('Nlength', $this->_string_shift($payload)));
                     $this->errors[] = 'SSH_MSG_GLOBAL_REQUEST: ' . utf8_decode($this->_string_shift($payload, $length));
@@ -2833,21 +2887,76 @@ class Net_SSH2
                     $payload = $this->_get_binary_packet();
                     break;
                 case NET_SSH2_MSG_CHANNEL_OPEN: // see http://tools.ietf.org/html/rfc4254#section-5.1
-                    $this->_string_shift($payload, 1);
-                    extract(unpack('Nlength', $this->_string_shift($payload, 4)));
-                    $this->errors[] = 'SSH_MSG_CHANNEL_OPEN: ' . utf8_decode($this->_string_shift($payload, $length));
+                    extract(unpack('Ctype/Nlength', $this->_string_shift($payload, 5)));
+                    $value = $this->_string_shift($payload, $length);
+                    switch($value) { 
+					    case 'auth-agent':
+                        case 'auth-agent@openssh.com':
+                            extract(unpack('Nserver_channel', $this->_string_shift($payload, 4)));          
+                            extract(unpack('Nremote_window_size', $this->_string_shift($payload, 4)));
+                            extract(unpack('Nremote_maximum_packet_size', $this->_string_shift($payload, 4)));
 
-                    $this->_string_shift($payload, 4); // skip over client channel
-                    extract(unpack('Nserver_channel', $this->_string_shift($payload, 4)));
+                            $this->packet_size_client_to_server[NET_SSH2_CHANNEL_AGENT_PROXY] = $remote_window_size;
+                            $this->window_size_server_to_client[NET_SSH2_CHANNEL_AGENT_PROXY] = $remote_maximum_packet_size;
+                            $this->window_size_client_to_server[NET_SSH2_CHANNEL_AGENT_PROXY] = $this->window_size;
 
-                    $packet = pack('CN3a*Na*',
-                        NET_SSH2_MSG_REQUEST_FAILURE, $server_channel, NET_SSH2_OPEN_ADMINISTRATIVELY_PROHIBITED, 0, '', 0, '');
+                            $packet_size = 0x4000;
 
-                    if (!$this->_send_binary_packet($packet)) {
-                        return $this->_disconnect(NET_SSH2_DISCONNECT_BY_APPLICATION);
+                            $packet = pack('CN4',
+                                NET_SSH2_MSG_CHANNEL_OPEN_CONFIRMATION, $server_channel,
+                                NET_SSH2_CHANNEL_AGENT_PROXY, $packet_size, $packet_size
+                            );
+
+                            $this->server_channels[NET_SSH2_CHANNEL_AGENT_PROXY] = $server_channel;
+
+                            $this->channel_status[NET_SSH2_CHANNEL_AGENT_PROXY] = NET_SSH2_MSG_CHANNEL_OPEN_CONFIRMATION;
+
+                            if (!$this->_send_binary_packet($packet)) {
+                                echo "exited here!!!\n";
+                                return false;
+                            }
+
+                            $agent = new System_SSH_Agent_Proxy();
+
+                            $keep_going = true;
+                            while ($keep_going) {
+                                $temp = $this->_get_channel_packet(NET_SSH2_CHANNEL_AGENT_PROXY);
+                                switch (true) {
+                                    case $temp === true:
+                                    case $temp === false:
+                                        $keep_going = false;
+                                        break;
+                                    default:
+                                        $this->_send_channel_packet(NET_SSH2_CHANNEL_AGENT_PROXY, $agent->process($temp));
+                                }
+                                echo "looping\n";
+                                ob_flush();
+                                flush();
+                            }
+
+                            echo debug_backtrace();
+                            echo "exit\n";
+                            ob_flush();
+                            flush();
+
+                            $payload = $this->_get_binary_packet();
+                            break;
+                        default:
+                            $this->errors[] = 'SSH_MSG_CHANNEL_OPEN: ' . utf8_decode($this->_string_shift($payload, $length));
+
+                            $this->_string_shift($payload, 4); // skip over client channel
+                            extract(unpack('Nserver_channel', $this->_string_shift($payload, 4)));
+
+                            $packet = pack('CN3a*Na*',
+                                NET_SSH2_MSG_REQUEST_FAILURE, $server_channel, NET_SSH2_OPEN_ADMINISTRATIVELY_PROHIBITED, 0, '', 0, '');
+
+                            if (!$this->_send_binary_packet($packet)) {
+                                return $this->_disconnect(NET_SSH2_DISCONNECT_BY_APPLICATION);
+                            }
+
+                            $payload = $this->_get_binary_packet();
+                            break;
                     }
-
-                    $payload = $this->_get_binary_packet();
                     break;
                 case NET_SSH2_MSG_CHANNEL_WINDOW_ADJUST:
                     $this->_string_shift($payload, 1);
@@ -2948,7 +3057,7 @@ class Net_SSH2
         if (!empty($this->channel_buffers[$client_channel])) {
             return array_shift($this->channel_buffers[$client_channel]);
         }
-
+																					
         while (true) {
             if ($this->curTimeout) {
                 if ($this->curTimeout < 0) {
@@ -2997,7 +3106,7 @@ class Net_SSH2
             }
 
             switch ($this->channel_status[$channel]) {
-                case NET_SSH2_MSG_CHANNEL_OPEN:
+                case NET_SSH2_MSG_CHANNEL_OPEN:;
                     switch ($type) {
                         case NET_SSH2_MSG_CHANNEL_OPEN_CONFIRMATION:
                             extract(unpack('Nserver_channel', $this->_string_shift($response, 4)));
@@ -3116,6 +3225,9 @@ class Net_SSH2
                     }
 
                     $this->channel_status[$channel] = NET_SSH2_MSG_CHANNEL_CLOSE;
+                    if ($channel == NET_SSH2_CHANNEL_AGENT_PROXY) {
+                        echo "closing channel AGENT\n";
+                    }
                     return true;
                 case NET_SSH2_MSG_CHANNEL_EOF:
                     break;
@@ -3318,6 +3430,15 @@ class Net_SSH2
         }
 
         $this->window_size_client_to_server[$client_channel]-= strlen($data);
+
+        if ($this->debug_me) { 
+            echo "replying on channel " . $this->server_channels[$client_channel] . "\n";
+            ob_flush();
+            flush();
+            if ($client_channel != NET_SSH2_CHANNEL_AGENT_PROXY) {
+                exit(1);
+            }
+        }
 
         return $this->_send_binary_packet(pack('CN2a*',
             NET_SSH2_MSG_CHANNEL_DATA,
