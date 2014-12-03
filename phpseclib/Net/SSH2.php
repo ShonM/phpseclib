@@ -850,7 +850,7 @@ class Net_SSH2
      */
     var $windowRows = 24;
 
-    var $agent_proxy = null; 
+    var $proxy = null; 
 
     /**
      * Default Constructor.
@@ -2144,9 +2144,10 @@ class Net_SSH2
      */
     function _ssh_agent_login($username, $agent)
     {
+        $this->agent = $agent; 
         $keys = $agent->requestIdentities();
         foreach ($keys as $key) {
-            if ($this->_privatekey_login($username, $key, $agent->haveRequestedForwarding())) {
+            if ($this->_privatekey_login($username, $key, $this->agent->request_forwarding)) {
                 return true;
             }
         }
@@ -3102,12 +3103,13 @@ class Net_SSH2
                             $this->channel_status[NET_SSH2_CHANNEL_AGENT_PROXY] = NET_SSH2_MSG_CHANNEL_OPEN_CONFIRMATION;
 
                             if (!$this->_send_binary_packet($packet)) {
-                                echo "exited here!!!\n";
                                 return false;
                             }
 
-                            if ($this->agent_proxy == null) 
-                                $this->agent_proxy = new System_SSH_Agent_Proxy();
+                            if ($this->agent == null) {
+                                user_error('Cannot forward authentication without SSH agent');
+                                return false; 
+                            }
                     }
                     break; 
                 case NET_SSH2_MSG_CHANNEL_DATA:
@@ -3124,7 +3126,7 @@ class Net_SSH2
                     $data = $this->_string_shift($response, $length);
 
                     if ($channel == NET_SSH2_CHANNEL_AGENT_PROXY) {
-                        $this->_send_channel_packet($channel, $this->agent_proxy->process($data));
+                        $this->_send_channel_packet($channel, $this->agent->proxy_process($data));
                         break;
                     }
 

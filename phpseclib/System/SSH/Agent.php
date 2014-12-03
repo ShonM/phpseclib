@@ -207,40 +207,6 @@ class System_SSH_Agent_Identity
     }
 }
 
-class System_SSH_Agent_Proxy
-{
-    var $fsock;
-
-    function System_SSH_Agent_Proxy() 
-    {
-        switch (true) {
-            case isset($_SERVER['SSH_AUTH_SOCK']):
-                $address = $_SERVER['SSH_AUTH_SOCK'];
-                break;
-            case isset($_ENV['SSH_AUTH_SOCK']):
-                $address = $_ENV['SSH_AUTH_SOCK'];
-                break;
-            default:
-                user_error('SSH_AUTH_SOCK not found');
-                return false;
-        }
-
-        $this->fsock = fsockopen('unix://' . $address, 0, $errno, $errstr);
-        if (!$this->fsock) {
-            user_error("Unable to connect to ssh-agent (Error $errno: $errstr)");
-        }
-        stream_set_timeout($this->fsock, 1);
-    }   
-
-    function process($packet) 
-    {
-        if (strlen($packet) != fwrite($this->fsock, $packet)) {
-            user_error('Connection closed during signing');
-        }
-        return fread($this->fsock, 2048);
-    }
-}
-
 /**
  * Pure-PHP ssh-agent client identity factory
  *
@@ -288,6 +254,9 @@ class System_SSH_Agent
         }
 
         $this->request_forwarding = $request_forwarding;
+        if ($this->request_forwarding) {
+            stream_set_timeout($this->fsock, 1);
+        }
     }
 
     /**
@@ -350,8 +319,11 @@ class System_SSH_Agent
         return $identities;
     }
 
-    function haveRequestedForwarding()
+    function proxy_process($packet) 
     {
-        return $this->request_forwarding;
+        if (strlen($packet) != fwrite($this->fsock, $packet)) {
+            user_error('Connection closed during signing');
+        }
+        return fread($this->fsock, 2048);
     }
 }
