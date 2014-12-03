@@ -127,10 +127,6 @@ define('NET_SSH2_LOG_REALTIME', 3);
 define('NET_SSH2_LOG_REALTIME_FILE', 4);
 /**#@-*/
 
-define('NET_SSH2_LOGGING', NET_SSH2_LOG_REALTIME_FILE);
-
-define('NET_SSH2_LOG_REALTIME_FILENAME', 'test.log');
-
 /**#@+
  * @access public
  * @see Net_SSH2::read()
@@ -632,8 +628,6 @@ class Net_SSH2
      */
     var $curTimeout;
 
-    var $debug_me;
-
     /**
      * Real-time log file pointer
      *
@@ -850,7 +844,13 @@ class Net_SSH2
      */
     var $windowRows = 24;
 
-    var $proxy = null; 
+    /** 
+     * A System_SSH_Agent for use in the SSH2 Agent Forwarding scenario
+     *
+     * @var System_SSH_Agent
+     * @access private
+     */
+    var $agent;
 
     /**
      * Default Constructor.
@@ -2282,7 +2282,7 @@ class Net_SSH2
             return false;
         }
 
-	    return true;
+        return true;
     }
 
     /**
@@ -2396,14 +2396,14 @@ class Net_SSH2
 
         if (!$this->_send_binary_packet($packet)) {
             return false;
-	    }
+        }
 
         $this->channel_status[NET_SSH2_CHANNEL_EXEC] = NET_SSH2_MSG_CHANNEL_REQUEST;
 
         $response = $this->_get_channel_packet(NET_SSH2_CHANNEL_EXEC);
         if ($response === false) {
             return false;
-	    }
+        }
 
         $this->channel_status[NET_SSH2_CHANNEL_EXEC] = NET_SSH2_MSG_CHANNEL_DATA;
 
@@ -2827,7 +2827,7 @@ class Net_SSH2
     /**
      * Filter Binary Packets
      *
-     * Because some binary packets need to be ignored...;
+     * Because some binary packets need to be ignored...
      *
      * @see Net_SSH2::_get_binary_packet()
      * @return String
@@ -2878,7 +2878,6 @@ class Net_SSH2
             switch (ord($payload[0])) {
                 case NET_SSH2_MSG_GLOBAL_REQUEST: // see http://tools.ietf.org/html/rfc4254#section-4
 
-                    echo "global request\n";
                     $this->_string_shift($payload, 1);
                     extract(unpack('Nlength', $this->_string_shift($payload)));
                     $this->errors[] = 'SSH_MSG_GLOBAL_REQUEST: ' . utf8_decode($this->_string_shift($payload, $length));
@@ -3106,7 +3105,7 @@ class Net_SSH2
                                 return false;
                             }
 
-                            if ($this->agent == null) {
+                            if (!isset($this->agent)) {
                                 user_error('Cannot forward authentication without SSH agent');
                                 return false; 
                             }
@@ -3182,8 +3181,6 @@ class Net_SSH2
                         case 'exit-status':
                             extract(unpack('Cfalse/Nexit_status', $this->_string_shift($response, 5)));
                             $this->exit_status = $exit_status;
-
-                            echo "got exit status\n";
 
                             // "The client MAY ignore these messages."
                             // -- http://tools.ietf.org/html/rfc4254#section-6.10
@@ -3409,15 +3406,6 @@ class Net_SSH2
         }
 
         $this->window_size_client_to_server[$client_channel]-= strlen($data);
-
-        if ($this->debug_me) { 
-            echo "replying on channel " . $this->server_channels[$client_channel] . "\n";
-            ob_flush();
-            flush();
-            if ($client_channel != NET_SSH2_CHANNEL_AGENT_PROXY) {
-                exit(1);
-            }
-        }
 
         return $this->_send_binary_packet(pack('CN2a*',
             NET_SSH2_MSG_CHANNEL_DATA,
