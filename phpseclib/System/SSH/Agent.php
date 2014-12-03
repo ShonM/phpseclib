@@ -237,14 +237,7 @@ class System_SSH_Agent_Proxy
         if (strlen($packet) != fwrite($this->fsock, $packet)) {
             user_error('Connection closed during signing');
         }
-        echo "entering process fread\n";
-        ob_flush();
-        flush();
-        $data = fread($this->fsock, 2048);
-        echo "exited process fread\n";
-        ob_flush();
-        flush();
-        return $data;
+        return fread($this->fsock, 2048);
     }
 }
 
