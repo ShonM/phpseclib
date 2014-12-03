@@ -3081,7 +3081,7 @@ class Net_SSH2
                 case NET_SSH2_MSG_CHANNEL_OPEN: // see http://tools.ietf.org/html/rfc4254#section-5.1
                     $data = $this->_string_shift($response, $length);
                     switch($data) { 
-					    case 'auth-agent':
+                        case 'auth-agent':
                         case 'auth-agent@openssh.com':
                             extract(unpack('Nserver_channel', $this->_string_shift($response, 4)));          
                             extract(unpack('Nremote_window_size', $this->_string_shift($response, 4)));
