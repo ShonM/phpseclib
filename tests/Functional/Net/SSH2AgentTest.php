@@ -49,7 +49,9 @@ class Functional_Net_SSH2AgentTest extends PhpseclibFunctionalTestCase
 
         $agent->startSSHForwarding($ssh);
         $this->assertEquals($username, trim($ssh->exec("ssh " . $username . "@" . $hostname . ' \'whoami\'')));
+
         $agent->stopSSHForwarding($ssh);
+        $this->assertEquals($username, 'failure');
 
         return $args;
     }

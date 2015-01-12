@@ -2167,7 +2167,6 @@ class SSH2
         return false;
     }
 
-
     /**
      * Set Timeout
      *
@@ -2275,12 +2274,8 @@ class SSH2
         // SSH_MSG_CHANNEL_OPEN_CONFIRMATION, RFC4254#section-5.1 states that the "maximum packet size" refers to the
         // "maximum size of an individual data packet". ie. SSH_MSG_CHANNEL_DATA.  RFC4254#section-5.2 corroborates.
         $packet = pack('CNNa*CNa*',
-<<<<<<< HEAD
-            NET_SSH2_MSG_CHANNEL_REQUEST, $this->server_channels[self::CHANNEL_EXEC], strlen('exec'), 'exec', 1, strlen($command), $command);
-=======
-            NET_SSH2_MSG_CHANNEL_REQUEST, $this->server_channels[NET_SSH2_CHANNEL_EXEC], strlen('exec'), 'exec', 1, strlen($command), $command);
+            NET_SSH2_MSG_CHANNEL_REQUEST, $this->server_channels[self::NET_SSH2_CHANNEL_EXEC], strlen('exec'), 'exec', 1, strlen($command), $command);
 
->>>>>>> SSH agent forwarding implementation
         if (!$this->_send_binary_packet($packet)) {
             return false;
         }
@@ -2928,7 +2923,7 @@ class SSH2
                 }
 
                 switch ($this->channel_status[$channel]) {
-                    case NET_SSH2_MSG_CHANNEL_OPEN:;
+                    case NET_SSH2_MSG_CHANNEL_OPEN:
                         switch ($type) {
                             case NET_SSH2_MSG_CHANNEL_OPEN_CONFIRMATION:
                                 extract(unpack('Nserver_channel', $this->_string_shift($response, 4)));

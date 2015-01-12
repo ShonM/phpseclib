@@ -283,7 +283,7 @@ class Agent
     function _forward_data($data)
     {
         if ($this->expected_bytes > 0) {
-            $this->socket_buffer .= $data;
+            $this->socket_buffer.= $data;
             $this->expected_bytes -= strlen($data);
         } else {
             $agent_data_bytes = current(unpack('N', $data));
