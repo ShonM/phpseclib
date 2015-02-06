@@ -76,11 +76,11 @@ class Agent
     var $fsock;
 
     /**
-     * Did we request agent forwarding
+     * Agent forwarding status
      *
      * @access private
      */
-    var $request_forwarding;
+    var $forward_status = SYSTEM_SSH_AGENT_FORWARD_NONE;
 
     /**
      * Buffer for accumulating forwarded authentication
@@ -182,7 +182,8 @@ class Agent
     }
 
     /**
-     * Request the remote server to forward authentication requests to the local SSH agent
+     * Signal that agent forwarding should
+     * be requested when a channel is opened
      *
      * @param Net_SSH2 $ssh
      * @return Boolean
@@ -190,16 +191,13 @@ class Agent
      */
     function startSSHForwarding($ssh)
     {
-        if (!$this->request_forwarding) {
-            $this->request_forwarding = true;
-            $this->_request_forwarding($ssh);
+        if ($this->forward_status == SYSTEM_SSH_AGENT_FORWARD_NONE) {
+            $this->forward_status = SYSTEM_SSH_AGENT_FORWARD_REQUEST;
         }
     }
 
     /**
-     * The worker function to make a request to a remote server
-     * asking it to forward authentication requests to the local SSH
-     * agent
+     * Request agent forwarding of remote server
      *
      * @param Net_SSH2 $ssh
      * @return Boolean
@@ -207,53 +205,41 @@ class Agent
      */
     function _request_forwarding($ssh)
     {
-        $ssh->window_size_server_to_client[NET_SSH2_CHANNEL_AGENT_REQUEST] = $ssh->window_size;
-        $packet_size = 0x4000;
-
-        $packet = pack('CNa*N3',
-            NET_SSH2_MSG_CHANNEL_OPEN, strlen('session'), 'session', NET_SSH2_CHANNEL_AGENT_REQUEST, $ssh->window_size_server_to_client[NET_SSH2_CHANNEL_AGENT_REQUEST], $packet_size);
-
-        $ssh->channel_status[NET_SSH2_CHANNEL_AGENT_REQUEST] = NET_SSH2_MSG_CHANNEL_OPEN;
-
-        if (!$ssh->_send_binary_packet($packet)) {
-            return false;
-        }
-
-        $response = $ssh->_get_channel_packet(NET_SSH2_CHANNEL_AGENT_REQUEST);
-        if ($response === false) {
-            return false;
-        }
+        $request_channel = $ssh->_get_open_channel();
 
         $packet = pack('CNNa*C',
-            NET_SSH2_MSG_CHANNEL_REQUEST, $ssh->server_channels[NET_SSH2_CHANNEL_AGENT_REQUEST], strlen('auth-agent-req@openssh.com'), 'auth-agent-req@openssh.com', 1);
+            NET_SSH2_MSG_CHANNEL_REQUEST, $ssh->server_channels[$request_channel], strlen('auth-agent-req@openssh.com'), 'auth-agent-req@openssh.com', 1);
 
-        $ssh->channel_status[NET_SSH2_CHANNEL_AGENT_REQUEST] = NET_SSH2_MSG_CHANNEL_REQUEST;
+        $ssh->channel_status[$request_channel] = NET_SSH2_MSG_CHANNEL_REQUEST;
 
         if (!$ssh->_send_binary_packet($packet)) {
             return false;
         }
 
-        $response = $ssh->_get_channel_packet(NET_SSH2_CHANNEL_AGENT_REQUEST);
+        $response = $ssh->_get_channel_packet($request_channel);
         if ($response === false) {
             return false;
         }
+
+        $ssh->channel_status[$request_channel] = NET_SSH2_MSG_CHANNEL_OPEN;
+        $this->forward_status = SYSTEM_SSH_AGENT_FORWARD_ACTIVE;
 
         return true;
     }
 
     /**
-     * On Successful Login
+     * On successful channel open
      *
-     * This method should be called upon successful SSH login if you
-     * wish to give the SSH Agent an opportunity to take further
-     * action. i.e. request agent forwarding
+     * This method is called upon successful channel
+     * open to give the SSH Agent an opportunity
+     * to take further action. i.e. request agent forwarding
      *
      * @param Net_SSH2 $ssh
      * @access private
      */
-    function _on_login_success($ssh)
+    function _on_channel_open($ssh)
     {
-        if ($this->request_forwarding) {
+        if ($this->forward_status == SYSTEM_SSH_AGENT_FORWARD_REQUEST) {
             $this->_request_forwarding($ssh);
         }
     }
