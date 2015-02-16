@@ -103,6 +103,7 @@ class SSH2
     const CHANNEL_EXEC      = 0; // PuTTy uses 0x100
     const CHANNEL_SHELL     = 1;
     const CHANNEL_SUBSYSTEM = 2;
+    const CHANNEL_AGENT_FORWARD = 3;
     /**#@-*/
 
     /**#@+
@@ -2273,7 +2274,7 @@ class SSH2
         // SSH_MSG_CHANNEL_OPEN_CONFIRMATION, RFC4254#section-5.1 states that the "maximum packet size" refers to the
         // "maximum size of an individual data packet". ie. SSH_MSG_CHANNEL_DATA.  RFC4254#section-5.2 corroborates.
         $packet = pack('CNNa*CNa*',
-            NET_SSH2_MSG_CHANNEL_REQUEST, $this->server_channels[self::NET_SSH2_CHANNEL_EXEC], strlen('exec'), 'exec', 1, strlen($command), $command);
+            NET_SSH2_MSG_CHANNEL_REQUEST, $this->server_channels[self::CHANNEL_EXEC], strlen('exec'), 'exec', 1, strlen($command), $command);
 
         if (!$this->_send_binary_packet($packet)) {
             return false;
@@ -2419,12 +2420,12 @@ class SSH2
      */
     function _get_open_channel()
     {
-        $channel = NET_SSH2_CHANNEL_EXEC;
+        $channel = self::CHANNEL_EXEC;
         do {
             if (array_key_exists($channel, $this->channel_status) && $this->channel_status[$channel] == NET_SSH2_MSG_CHANNEL_OPEN) {
                 return $channel;
             }
-        } while ($channel++ < NET_SSH2_CHANNEL_SUBSYSTEM);
+        } while ($channel++ < self::CHANNEL_SUBSYSTEM);
 
         user_error("Unable to find an open channel");
     }
@@ -2793,7 +2794,7 @@ class SSH2
                         case 'auth-agent':
                         case 'auth-agent@openssh.com':
                             if (isset($this->agent)) {
-                                  $new_channel = NET_SSH2_CHANNEL_AGENT_FORWARD;
+                                  $new_channel = self::CHANNEL_AGENT_FORWARD;
 
                                   extract(unpack('Nremote_window_size', $this->_string_shift($payload, 4)));
                                   extract(unpack('Nremote_maximum_packet_size', $this->_string_shift($payload, 4)));
@@ -3028,7 +3029,7 @@ class SSH2
                     extract(unpack('Nlength', $this->_string_shift($response, 4)));
                     $data = $this->_string_shift($response, $length);
 
-                    if ($channel == NET_SSH2_CHANNEL_AGENT_FORWARD) {
+                    if ($channel == self::CHANNEL_AGENT_FORWARD) {
                         $agent_response = $this->agent->_forward_data($data);
                         if (!is_bool($agent_response)) {
                             $this->_send_channel_packet($channel, $agent_response);

@@ -62,6 +62,13 @@ class Agent
     const SSH_AGENT_SIGN_RESPONSE = 14;
     /**#@-*/
 
+    // no forwarding requested and not active
+    const SSH_AGENT_FORWARD_NONE = 0;
+    // request agent forwarding when opportune
+    const SSH_AGENT_FORWARD_REQUEST = 1;
+    // forwarding has been request and is active
+    const SSH_AGENT_FORWARD_ACTIVE = 2;
+
     /**
      * Unused
      */
@@ -80,7 +87,7 @@ class Agent
      *
      * @access private
      */
-    var $forward_status = SYSTEM_SSH_AGENT_FORWARD_NONE;
+    var $forward_status = self::SSH_AGENT_FORWARD_NONE;
 
     /**
      * Buffer for accumulating forwarded authentication
@@ -191,8 +198,8 @@ class Agent
      */
     function startSSHForwarding($ssh)
     {
-        if ($this->forward_status == SYSTEM_SSH_AGENT_FORWARD_NONE) {
-            $this->forward_status = SYSTEM_SSH_AGENT_FORWARD_REQUEST;
+        if ($this->forward_status == self::SSH_AGENT_FORWARD_NONE) {
+            $this->forward_status = self::SSH_AGENT_FORWARD_REQUEST;
         }
     }
 
@@ -222,7 +229,7 @@ class Agent
         }
 
         $ssh->channel_status[$request_channel] = NET_SSH2_MSG_CHANNEL_OPEN;
-        $this->forward_status = SYSTEM_SSH_AGENT_FORWARD_ACTIVE;
+        $this->forward_status = self::SSH_AGENT_FORWARD_ACTIVE;
 
         return true;
     }
@@ -239,7 +246,7 @@ class Agent
      */
     function _on_channel_open($ssh)
     {
-        if ($this->forward_status == SYSTEM_SSH_AGENT_FORWARD_REQUEST) {
+        if ($this->forward_status == self::SSH_AGENT_FORWARD_REQUEST) {
             $this->_request_forwarding($ssh);
         }
     }
